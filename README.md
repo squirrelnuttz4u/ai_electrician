@@ -54,11 +54,37 @@ Browser ──▶ web (React/nginx) ──▶ api (FastAPI) ──▶ Postgres +
 
 ## Quick start
 
-**Requirements:** Docker + Docker Compose, and access to an Ollama server.
+**Requirements:** access to an Ollama server. The installer sets up Docker for you.
 
+### One-command install (recommended)
+
+**Ubuntu / Debian server:**
 ```bash
 git clone <this repo>
 cd ai_electrician
+sudo ./scripts/install-ubuntu.sh
+```
+Installs Docker if missing, generates a secure `.env` (random DB password + secret,
+prompts for the Ollama URL and optional app password), builds and starts the stack,
+and verifies the API + Ollama connection.
+
+**Windows server (PowerShell, run as Administrator):**
+```powershell
+git clone <this repo>
+cd ai_electrician
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\scripts\install-windows.ps1
+```
+Checks for Docker Desktop (installs via `winget` if missing — you then start Docker
+Desktop once and re-run), generates `.env`, and brings the stack up.
+
+> Both installers are **idempotent**: re-running them never overwrites an existing
+> `.env`, so your database password stays stable across upgrades. To change settings
+> later, edit `.env` and run `docker compose up -d --build`.
+
+### Manual install
+
+```bash
 cp .env.example .env
 # edit .env — at minimum set OLLAMA_BASE_URL and the model names (see below)
 docker compose up -d --build
