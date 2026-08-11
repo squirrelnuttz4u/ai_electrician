@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     data_dir: str = "/data"
 
     # Ollama
-    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_base_url: str = "http://192.168.203.100:11434"
     ollama_chat_model: str = "gpt-oss:120b"
     ollama_vision_model: str = "qwen2.5-vl:72b"
     ollama_embed_model: str = "nomic-embed-text"
