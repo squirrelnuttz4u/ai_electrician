@@ -107,7 +107,7 @@ OLLAMA_BASE_URL=http://host.docker.internal:11434
 # OLLAMA_BASE_URL=http://192.168.1.50:11434
 
 OLLAMA_CHAT_MODEL=gpt-oss:120b        # reasoning / troubleshooting answers
-OLLAMA_VISION_MODEL=qwen2.5-vl:72b    # reads the schematics during extraction
+OLLAMA_VISION_MODEL=qwen2.5vl:72b    # reads the schematics during extraction
 OLLAMA_EMBED_MODEL=nomic-embed-text   # search embeddings
 EMBED_DIM=768                         # must match the embed model (nomic-embed-text = 768)
 ```
@@ -116,12 +116,12 @@ Pull the models on your Ollama server first, e.g.:
 
 ```bash
 ollama pull gpt-oss:120b
-ollama pull qwen2.5-vl:72b
+ollama pull qwen2.5vl:72b
 ollama pull nomic-embed-text
 ```
 
 > **Model choice (≤120B):** `gpt-oss:120b` is a strong reasoner for troubleshooting.
-> For vision, any capable open VLM works (`qwen2.5-vl:72b`, `llama3.2-vision:90b`, …).
+> For vision, any capable open VLM works (`qwen2.5vl:72b`, `llama3.2-vision:90b`, …).
 > To simplify ops you can set `OLLAMA_CHAT_MODEL` and `OLLAMA_VISION_MODEL` to the
 > **same** capable vision model. If you change the embed model, update `EMBED_DIM`
 > to match and re-create the DB (the vector column dimension is fixed at migration).
