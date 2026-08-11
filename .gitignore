@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Env / secrets
+.env
+.env.local
+*.local
+
+# Data (uploaded prints, rendered page images) — never commit shop data
+/data/*
+!/data/.gitkeep
+
+# Local backups
+/backups/
+
+# Misc
+.DS_Store
+*.log

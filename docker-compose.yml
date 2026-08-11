@@ -1,0 +1,72 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aielec}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_DB: ${POSTGRES_DB:-aielectrician}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aielec}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+    volumes:
+      - app_data:/data
+    ports:
+      - "${API_PORT:-8000}:8000"
+    # host.docker.internal lets the container reach an Ollama server running on
+    # the host machine. If Ollama is on another box, set OLLAMA_BASE_URL in .env.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["arq", "app.worker.WorkerSettings"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+    volumes:
+      - app_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  db_data:
+  app_data:
