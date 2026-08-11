@@ -48,7 +48,14 @@ def list_messages(session_id: int, db: Session = Depends(get_db)):
     )
 
 
-def _history(db: Session, session_id: int, limit: int = 6) -> list[dict]:
+def _history(db: Session, session_id: int, limit: int = 16) -> list[dict]:
+    """Recent turns fed back to the model so follow-ups keep context.
+
+    16 messages is roughly eight exchanges — enough for a real troubleshooting
+    back-and-forth ("tried that, still dead" -> "check upstream" -> "CB2 is
+    tripped") without letting the prompt grow unbounded and crowd out the
+    retrieved schematic context that keeps answers grounded.
+    """
     msgs = (
         db.query(ChatMessage)
         .filter(ChatMessage.session_id == session_id)

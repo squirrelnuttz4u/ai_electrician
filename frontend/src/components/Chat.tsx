@@ -16,12 +16,62 @@ export function Chat({ machineId }: { machineId: number }) {
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [hydrating, setHydrating] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
+
+  // Restore the machine's most recent conversation. The component unmounts on
+  // every tab switch and on citation navigation, so local state alone cannot
+  // survive; the server is the source of truth. Reloading from it also means a
+  // browser refresh — or a different tablet — resumes the same session.
+  useEffect(() => {
+    let cancelled = false;
+    setHydrating(true);
+    setMessages([]);
+    setSessionId(null);
+
+    (async () => {
+      try {
+        const sessions = await api.listSessions(machineId);
+        if (cancelled || sessions.length === 0) return;
+        const latest = sessions[0]; // server orders created_at DESC
+        const prior = await api.listChatMessages(latest.id);
+        if (cancelled) return;
+        setSessionId(latest.id);
+        setMessages(
+          prior.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            citations: m.citations ?? undefined,
+            feedback: m.feedback,
+          }))
+        );
+      } catch (e) {
+        // Non-fatal: fall back to an empty chat. Asking still works and simply
+        // starts a new session.
+        console.error("Could not restore the previous conversation:", e);
+      } finally {
+        if (!cancelled) setHydrating(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [machineId]);
 
   useEffect(() => {
     logRef.current?.scrollTo(0, logRef.current.scrollHeight);
   }, [messages]);
+
+  // Drop the session pointer only. The old conversation stays in the database,
+  // so any knowledge-base entry created from it keeps its source. The server
+  // creates a fresh session on the next ask, titled from that first message.
+  const newChat = () => {
+    if (busy) return;
+    setSessionId(null);
+    setMessages([]);
+    setInput("");
+  };
 
   const send = async () => {
     const q = input.trim();
@@ -79,8 +129,19 @@ export function Chat({ machineId }: { machineId: number }) {
 
   return (
     <div className="chat">
+      {messages.length > 0 && (
+        <div className="chat-header">
+          <span className="muted small">
+            {busy ? "Answering…" : "Continuing this conversation — ask a follow-up below."}
+          </span>
+          <button onClick={newChat} disabled={busy} title="Start a fresh conversation. This one is kept.">
+            + New chat
+          </button>
+        </div>
+      )}
       <div className="chat-log" ref={logRef}>
-        {messages.length === 0 && (
+        {hydrating && messages.length === 0 && <div className="empty"><p className="muted">Loading…</p></div>}
+        {!hydrating && messages.length === 0 && (
           <div className="empty">
             <p>Describe the electrical problem in plain English.</p>
             <p className="small">e.g. <em>"cutter motor fails to start"</em> or <em>"no control voltage at the main panel"</em></p>
