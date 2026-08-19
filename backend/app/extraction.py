@@ -37,7 +37,7 @@ Rules:
 - confidence is your own 0..1 certainty for each item.
 - If a section has nothing, return an empty list. Output JSON only, no prose.
 
-Text extracted from this page (may help, may be noisy):
+{vocabulary}Text extracted from this page (may help, may be noisy):
 ---
 {page_text}
 ---
@@ -51,11 +51,16 @@ def _clip(text: str, limit: int = 6000) -> str:
     return text[:limit] if text else ""
 
 
-async def extract_page(page_image: bytes, page_text: str) -> dict:
+async def extract_page(page_image: bytes, page_text: str, vocabulary: str = "") -> dict:
     """Run vision extraction for one page. Returns a dict with components/wires/
     connections lists (possibly empty). Never raises — extraction failures
-    degrade to empty results so ingestion continues."""
-    prompt = EXTRACTION_PROMPT.replace("{page_text}", _clip(page_text))
+    degrade to empty results so ingestion continues.
+
+    `vocabulary` is an optional block describing labels a technician has already
+    confirmed on this machine (see build_vocabulary_hint)."""
+    prompt = EXTRACTION_PROMPT.replace("{vocabulary}", vocabulary or "").replace(
+        "{page_text}", _clip(page_text)
+    )
     try:
         data = await generate_json(prompt, images=[page_image])
     except OllamaError:
@@ -290,6 +295,7 @@ async def extract_page_multi(
     page_text: str,
     passes: int | None = None,
     tile_grid: int | None = None,
+    vocabulary: str = "",
 ) -> MultiPassResult:
     """Read one page with `passes` reads over each of tile_grid^2 regions.
 
@@ -310,7 +316,7 @@ async def extract_page_multi(
     for region in regions:
         for _ in range(passes):
             calls += 1
-            single = await extract_page(region, page_text)
+            single = await extract_page(region, page_text, vocabulary)
             if single.get("error"):
                 failed += 1
                 continue
@@ -341,3 +347,55 @@ async def extract_page_multi(
         calls_made=calls,
         calls_failed=failed,
     )
+
+
+# ---------------------------------------------------------------------------
+# Machine memory
+#
+# Corrections used to improve only the row a tech edited. The next print for the
+# same machine was read completely cold, so the model repeated mistakes that had
+# already been fixed once. Feeding back what a technician has confirmed is what
+# makes each print easier than the last.
+#
+# The hint is deliberately worded as a preference, not an instruction: forcing
+# known labels onto a page that does not contain them would trade one error for
+# a worse one. The corroboration check in score_confidence remains the backstop,
+# since a label pushed in from vocabulary but absent from the page text still
+# fails to corroborate and is flagged.
+# ---------------------------------------------------------------------------
+
+MAX_VOCAB_TERMS = 60
+MAX_CORRECTION_PAIRS = 15
+
+
+def build_vocabulary_hint(
+    designators: list[str],
+    wire_numbers: list[str],
+    correction_pairs: list[tuple[str, str]] | None = None,
+) -> str:
+    """Render confirmed labels and past misreads as a prompt block.
+
+    Returns "" when there is nothing confirmed yet, so a machine's first print is
+    read exactly as before.
+    """
+    designators = [d for d in dict.fromkeys(designators) if d][:MAX_VOCAB_TERMS]
+    wire_numbers = [w for w in dict.fromkeys(wire_numbers) if w][:MAX_VOCAB_TERMS]
+    pairs = [(a, b) for a, b in (correction_pairs or []) if a and b and a != b][:MAX_CORRECTION_PAIRS]
+
+    if not (designators or wire_numbers or pairs):
+        return ""
+
+    lines = [
+        "Labels a technician has already CONFIRMED on other prints for this same machine.",
+        "Where the drawing is smudged or ambiguous, prefer these exact spellings.",
+        "Do NOT report a label just because it appears here — only report what you can",
+        "actually see on this page.",
+    ]
+    if designators:
+        lines.append("  confirmed components: " + ", ".join(designators))
+    if wire_numbers:
+        lines.append("  confirmed wire numbers: " + ", ".join(wire_numbers))
+    if pairs:
+        lines.append("Misreads previously corrected on this machine (wrong -> right):")
+        lines.append("  " + ", ".join(f"{a} -> {b}" for a, b in pairs))
+    return "\n".join(lines) + "\n\n"

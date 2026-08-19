@@ -46,6 +46,10 @@ async def ingest_print(print_id: int) -> None:
         pr.page_count = len(pages)
         db.commit()
 
+        # What this machine's other prints have already taught us. Built once per
+        # print: it cannot change mid-ingest, and it costs two queries.
+        vocabulary = _machine_vocabulary(db, pr.machine_id, exclude_print_id=print_id)
+
         low_conf_count = 0
         total_entities = 0
         failed_pages: list[int] = []   # vision call errored — NOT the same as an empty page
@@ -85,7 +89,7 @@ async def ingest_print(print_id: int) -> None:
             pr.status_detail = f"Reading schematic page {page.page_number}/{len(pages)}"
             db.commit()
             image_bytes = pdf_processing.load_page_image(page.image_path)
-            multi = await extraction.extract_page_multi(image_bytes, page.text)
+            multi = await extraction.extract_page_multi(image_bytes, page.text, vocabulary=vocabulary)
             result = {
                 "components": multi.components,
                 "wires": multi.wires,
@@ -230,6 +234,65 @@ async def ingest_print(print_id: int) -> None:
             db.commit()
     finally:
         db.close()
+
+
+def _machine_vocabulary(db: Session, machine_id: int, exclude_print_id: int) -> str:
+    """Confirmed labels and past misreads for a machine, as a prompt block.
+
+    Only tech-verified entities count: feeding unverified extractions back in
+    would let one print's hallucination seed the next print's prompt.
+    """
+    from sqlalchemy import text as sql_text
+
+    try:
+        designators = [
+            r[0] for r in db.execute(
+                sql_text(
+                    """
+                    SELECT DISTINCT c.designator
+                    FROM components c JOIN prints p ON c.print_id = p.id
+                    WHERE p.machine_id = :mid AND c.verified AND c.print_id <> :pid
+                    ORDER BY c.designator LIMIT 200
+                    """
+                ),
+                {"mid": machine_id, "pid": exclude_print_id},
+            ).all()
+        ]
+        wires = [
+            r[0] for r in db.execute(
+                sql_text(
+                    """
+                    SELECT DISTINCT w.wire_number
+                    FROM wires w JOIN prints p ON w.print_id = p.id
+                    WHERE p.machine_id = :mid AND w.verified AND w.print_id <> :pid
+                    ORDER BY w.wire_number LIMIT 200
+                    """
+                ),
+                {"mid": machine_id, "pid": exclude_print_id},
+            ).all()
+        ]
+        # Misreads worth warning about are the ones that happened more than once.
+        pairs = [
+            (r[0], r[1]) for r in db.execute(
+                sql_text(
+                    """
+                    SELECT original->>'designator' AS was,
+                           corrected->>'designator' AS now,
+                           count(*) AS n
+                    FROM corrections
+                    WHERE machine_id = :mid AND target_type = 'component'
+                      AND original->>'designator' IS DISTINCT FROM corrected->>'designator'
+                    GROUP BY 1, 2 HAVING count(*) > 1
+                    ORDER BY n DESC LIMIT 15
+                    """
+                ),
+                {"mid": machine_id},
+            ).all()
+        ]
+    except Exception:  # noqa: BLE001 - a hint is an optimisation, never fatal
+        return ""
+
+    return extraction.build_vocabulary_hint(designators, wires, pairs)
 
 
 def _ranges(pages: list[int]) -> str:
