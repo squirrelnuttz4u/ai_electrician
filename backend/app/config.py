@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     extraction_tile_grid: int = 1
     extraction_tile_overlap: float = 0.12
 
+    # Items scoring below this are flagged for review, and are down-weighted in
+    # retrieval so an unverified guess never outranks a tech-verified fact.
+    review_confidence_threshold: float = 0.55
+
     # Auth
     auth_enabled: bool = False
     auth_shared_password: str = "change-me"

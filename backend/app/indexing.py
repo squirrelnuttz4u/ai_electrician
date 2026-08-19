@@ -21,7 +21,7 @@ from .config import settings
 from .database import SessionLocal
 from .models import Component, Connection, DocChunk, Print, PrintPage, Wire
 
-LOW_CONFIDENCE = 0.55
+LOW_CONFIDENCE = settings.review_confidence_threshold
 
 
 async def _embed_safe(text_value: str) -> list[float] | None:
