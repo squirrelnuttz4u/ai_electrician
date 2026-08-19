@@ -34,6 +34,20 @@ class Settings(BaseSettings):
     render_dpi: int = 200
     text_layer_min_chars: int = 40
 
+    # Extraction (multi-pass)
+    # extraction_passes: how many times each region is read. Repeated reads give
+    #   an agreement signal — an item both passes find is far more trustworthy
+    #   than one only a single pass invented. 1 disables the signal.
+    # extraction_tile_grid: N splits each page into an NxN grid of overlapping
+    #   tiles, each sent at full resolution. Dense ladder logic loses small wire
+    #   numbers when a whole sheet is downscaled to the model's input size.
+    #   1 = whole page, no tiling.
+    # Cost is passes * tiles^2 vision calls per page, so 2 passes on a 2x2 grid
+    # is 8 calls/page. Raise deliberately.
+    extraction_passes: int = 2
+    extraction_tile_grid: int = 1
+    extraction_tile_overlap: float = 0.12
+
     # Auth
     auth_enabled: bool = False
     auth_shared_password: str = "change-me"

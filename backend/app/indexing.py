@@ -48,6 +48,8 @@ async def ingest_print(print_id: int) -> None:
 
         low_conf_count = 0
         total_entities = 0
+        failed_pages: list[int] = []   # vision call errored — NOT the same as an empty page
+        barren_pages: list[int] = []   # real text present, but nothing extracted
 
         for page in pages:
             db.add(
@@ -83,13 +85,36 @@ async def ingest_print(print_id: int) -> None:
             pr.status_detail = f"Reading schematic page {page.page_number}/{len(pages)}"
             db.commit()
             image_bytes = pdf_processing.load_page_image(page.image_path)
-            result = await extraction.extract_page(image_bytes, page.text)
+            multi = await extraction.extract_page_multi(image_bytes, page.text)
+            result = {
+                "components": multi.components,
+                "wires": multi.wires,
+                "connections": multi.connections,
+                "error": multi.error,
+            }
+
+            # A failed vision call returns empty lists, which is indistinguishable
+            # from a legitimately empty page (a legend or notes sheet) unless we
+            # record it here. Left unrecorded, a timed-out page silently reports
+            # "no components on this sheet".
+            if result.get("error"):
+                failed_pages.append(page.page_number)
+            elif not (result["components"] or result["wires"]):
+                # Legends and notes sheets genuinely have no devices; a dense
+                # schematic that yields nothing is a different matter, so only
+                # flag pages that carried a meaningful amount of text.
+                if len(page.text.strip()) >= 200:
+                    barren_pages.append(page.page_number)
 
             for comp in result["components"]:
                 designator = str(comp.get("designator", "")).strip()
                 if not designator:
                     continue
-                conf = _float(comp.get("confidence"))
+                conf = extraction.score_confidence(
+                    comp.get("confidence"),
+                    extraction.corroborated(designator, page.text),
+                    agreement=comp.get("agreement", 1.0),
+                )
                 comp_row = Component(
                     print_id=print_id,
                     page_number=page.page_number,
@@ -124,7 +149,11 @@ async def ingest_print(print_id: int) -> None:
                 wnum = str(wire.get("wire_number", "")).strip()
                 if not wnum:
                     continue
-                conf = _float(wire.get("confidence"))
+                conf = extraction.score_confidence(
+                    wire.get("confidence"),
+                    extraction.corroborated(wnum, page.text),
+                    agreement=wire.get("agreement", 1.0),
+                )
                 wire_row = Wire(
                     print_id=print_id,
                     page_number=page.page_number,
@@ -172,13 +201,22 @@ async def ingest_print(print_id: int) -> None:
                 )
             db.commit()
 
-        # finalize status
+        # Finalize status. Anything the tech should look at wins over "ready":
+        # a silent failure that reports success is worse than an honest flag.
+        problems: list[str] = []
+        if failed_pages:
+            problems.append(f"vision extraction failed on page(s) {_ranges(failed_pages)}")
+        if barren_pages:
+            problems.append(f"no components/wires found on page(s) {_ranges(barren_pages)}")
+        if low_conf_count:
+            problems.append(f"{low_conf_count} low-confidence item(s)")
+
         if total_entities == 0:
             pr.status = "review"
             pr.status_detail = "No components/wires were extracted — review recommended."
-        elif low_conf_count > 0:
+        elif problems:
             pr.status = "review"
-            pr.status_detail = f"{low_conf_count} low-confidence item(s) flagged for review."
+            pr.status_detail = f"Extracted {total_entities} item(s); " + "; ".join(problems) + "."
         else:
             pr.status = "ready"
             pr.status_detail = f"Extracted {total_entities} item(s)."
@@ -192,6 +230,23 @@ async def ingest_print(print_id: int) -> None:
             db.commit()
     finally:
         db.close()
+
+
+def _ranges(pages: list[int]) -> str:
+    """Condense a page list into a compact human-readable string: 3, 11-13, 15."""
+    if not pages:
+        return ""
+    ordered = sorted(set(pages))
+    spans: list[str] = []
+    start = prev = ordered[0]
+    for n in ordered[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        spans.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = n
+    spans.append(str(start) if start == prev else f"{start}-{prev}")
+    return ", ".join(spans)
 
 
 def _str(value) -> str | None:
