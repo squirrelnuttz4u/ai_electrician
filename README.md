@@ -20,12 +20,17 @@ the shop.
 ## What it does
 
 - **Organize by machine** — machines are the top-level unit; prints belong to a machine.
-- **Upload / delete prints** — drag-drop PDFs. Vector CAD exports *and* scanned
-  images are supported (a text layer is used when present; OCR runs automatically for scans).
+- **Upload / delete prints** — drag-drop PDFs, one at a time or a whole batch.
+  Vector CAD exports *and* scanned images are supported (a text layer is used when
+  present; OCR runs automatically for scans).
 - **AI reads the prints** — on upload, a vision model extracts components
   (M3, CR1, CB2…), wire numbers (A1, X2…), voltages, and connections into a
-  structured, searchable model.
-- **Troubleshoot by chat** — machine-scoped Q&A with streamed answers and clickable citations.
+  structured, searchable model. Each page is read more than once and every
+  reading is checked against the page's own text before it is trusted — see
+  [How reads are trusted](#how-reads-are-trusted-important).
+- **Troubleshoot by chat** — machine-scoped Q&A with streamed answers and clickable
+  citations. Conversations persist, so you can switch tabs, open a cited print, or
+  reload the page and carry on asking follow-ups.
 - **View & search** — a page viewer with zoom, full-text/wire-number search, and
   entity overlays, so you can confirm what the AI tells you.
 - **Train by correcting** — fix any mis-read component or wire, and mark answers
@@ -131,13 +136,18 @@ ollama pull nomic-embed-text
 ## Using it
 
 1. **Create a machine** (e.g. "Line 3 Cutter").
-2. **Upload prints** (PDF) under that machine. Processing runs in the background —
-   status goes `processing → ready`, or `review` if the AI flagged low-confidence reads.
+2. **Upload prints** (PDF) under that machine — select as many files as you like.
+   They upload one after another and process in the background, so a large batch can
+   take hours. Status goes `processing → ready`, or `review` when anything needs a
+   human eye: low-confidence reads, a page the vision model failed on, or a page that
+   yielded nothing despite carrying text. The reason is shown next to the status.
 3. **Review** (optional but recommended): open a print, use the *Review* panel to fix
    any wrong designators/wire numbers/voltages and click **Verify**. This directly
    improves the assistant.
 4. **Troubleshoot**: open the machine's *Troubleshoot* tab and describe the problem.
-   Click a citation chip to jump to the exact page and confirm.
+   Click a citation chip to jump to the exact page and confirm — the conversation is
+   waiting when you come back. **+ New chat** starts a fresh one; the old conversation
+   is kept.
 5. **Correct answers**: 👍 marks an answer helpful (saved as verified guidance); 👎 lets
    you type the correct guidance. Both feed the machine's **Knowledge Base**.
 
@@ -152,6 +162,45 @@ This system does **not** fine-tune the LLM's weights. Instead it improves throug
 
 The result: the assistant gets measurably better per machine over time, safely and
 locally, without ever retraining a model.
+
+### How reads are trusted (important)
+
+A vision model reading a schematic will sometimes **invent** plausible detail. On a
+real 16-page scanned drawing set, one page showed connector blocks labelled `J6` and
+`J7`; the model reported the complete pin runs `J6-1`…`J6-14` and `J7-1`…`J7-16` — 33
+entries, none of which appear anywhere in the page's text — and rated them 0.8–1.0
+confident. A model's own confidence score is not evidence.
+
+So a reading is scored on two signals the model cannot inflate:
+
+- **Corroboration** — does the designator or wire number actually appear in the page's
+  own text layer (or OCR output)? An uncorroborated item is always pushed below the
+  review threshold, however certain the model claims to be.
+- **Agreement** — each region is read `EXTRACTION_PASSES` times and results merged.
+  An invented item rarely survives an independent re-read, so the share of passes
+  reporting it is real evidence.
+
+Anything that fails those checks lands in **review** rather than being presented as
+fact. This means a scanned print whose OCR is poor will flag a lot of items — that is
+the honest outcome: those reads are *unverifiable*, not necessarily wrong, and a
+tech's eye is exactly what they need. Prints with a real text layer (vector CAD
+exports) corroborate cleanly and flag far less.
+
+### Tuning extraction
+
+```ini
+EXTRACTION_PASSES=2        # reads per region; 1 disables the agreement signal
+EXTRACTION_TILE_GRID=1     # NxN overlapping tiles per page; 1 = whole page
+EXTRACTION_TILE_OVERLAP=0.12
+```
+
+Cost is `EXTRACTION_PASSES × EXTRACTION_TILE_GRID²` vision calls **per page**, and a
+large vision model takes roughly a minute per call — so a 16-page set at the defaults
+is already a ~30 minute job. Raise these deliberately.
+
+Tiling sends each region at full resolution and mainly helps **dense ladder logic**,
+where small wire numbers dissolve when a whole sheet is downscaled to the model's
+input size. It is off by default because `2` (a 2×2 grid) quadruples ingestion time.
 
 ---
 
