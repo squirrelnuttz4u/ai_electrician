@@ -75,7 +75,7 @@ function PrintsTab({ machineId }: { machineId: number }) {
     <>
       <div className="spread">
         <h2>Schematics</h2>
-        <button className="primary" onClick={() => setShowUpload(true)}>+ Upload print</button>
+        <button className="primary" onClick={() => setShowUpload(true)}>+ Upload prints</button>
       </div>
       {prints.length === 0 ? (
         <div className="empty"><p>No prints uploaded for this machine yet.</p></div>
@@ -107,37 +107,126 @@ function PrintsTab({ machineId }: { machineId: number }) {
   );
 }
 
+type QueueItem = {
+  file: File;
+  title: string;
+  status: "pending" | "uploading" | "done" | "error";
+  error?: string;
+};
+
 function UploadModal({ machineId, onClose, onDone }: { machineId: number; onClose: () => void; onDone: () => void }) {
-  const [title, setTitle] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const submit = async () => {
-    if (!file) return setError("Choose a PDF file");
-    setBusy(true); setError("");
-    try {
-      await api.uploadPrint(machineId, title.trim() || file.name.replace(/\.pdf$/i, ""), file);
-      onDone();
-    } catch (e: any) {
-      setError(e.message); setBusy(false);
-    }
+  const addFiles = (list: FileList | null) => {
+    if (!list) return;
+    setError("");
+    const picked: QueueItem[] = Array.from(list).map((f) => ({
+      file: f,
+      title: f.name.replace(/\.pdf$/i, ""),
+      status: "pending",
+    }));
+    // De-duplicate by name+size so re-picking the same file does not queue it twice.
+    setQueue((q) => {
+      const seen = new Set(q.map((i) => `${i.file.name}:${i.file.size}`));
+      return [...q, ...picked.filter((i) => !seen.has(`${i.file.name}:${i.file.size}`))];
+    });
   };
 
+  const setItem = (idx: number, patch: Partial<QueueItem>) =>
+    setQueue((q) => q.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+
+  // Upload serially. Each upload enqueues its own worker job, and the worker
+  // reads pages through a single large vision model — firing them off in
+  // parallel would only make them compete for VRAM on the Ollama server.
+  const submit = async () => {
+    const pending = queue.filter((i) => i.status === "pending" || i.status === "error");
+    if (pending.length === 0) return setError("Choose at least one PDF");
+    setBusy(true);
+    setError("");
+    let uploaded = 0;
+
+    for (let i = 0; i < queue.length; i++) {
+      if (queue[i].status === "done") continue;
+      setItem(i, { status: "uploading", error: undefined });
+      try {
+        await api.uploadPrint(machineId, queue[i].title.trim() || queue[i].file.name, queue[i].file);
+        setItem(i, { status: "done" });
+        uploaded++;
+      } catch (e: any) {
+        // One bad file must not abandon the rest of the batch.
+        setItem(i, { status: "error", error: e.message });
+      }
+    }
+
+    setBusy(false);
+    if (uploaded > 0) onDone();
+  };
+
+  const remaining = queue.filter((i) => i.status !== "done").length;
+  const failed = queue.filter((i) => i.status === "error").length;
+  const allDone = queue.length > 0 && remaining === 0;
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Upload print</h2>
-        <p className="muted small">PDF schematics. Vector CAD exports and scanned prints are both supported (OCR runs automatically for scans).</p>
-        <label>Title</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Main Control Panel — Sheet 1" />
-        <label>PDF file *</label>
-        <input ref={fileRef} type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        <h2>Upload prints</h2>
+        <p className="muted small">
+          PDF schematics — select as many as you like. Vector CAD exports and scanned prints are both
+          supported (OCR runs automatically for scans).
+        </p>
+
+        <label>PDF file(s) *</label>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf"
+          multiple
+          disabled={busy}
+          onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
+        />
+
+        {queue.length > 0 && (
+          <div className="upload-queue">
+            {queue.map((it, i) => (
+              <div key={`${it.file.name}:${i}`} className="upload-row">
+                <span className={`upload-state ${it.status}`}>
+                  {it.status === "done" ? "✓" : it.status === "error" ? "✗" : it.status === "uploading" ? "…" : "·"}
+                </span>
+                <input
+                  className="upload-title"
+                  value={it.title}
+                  disabled={busy || it.status === "done"}
+                  onChange={(e) => setItem(i, { title: e.target.value })}
+                />
+                <span className="muted small">{(it.file.size / 1048576).toFixed(1)} MB</span>
+                {!busy && it.status !== "done" && (
+                  <button onClick={() => setQueue((q) => q.filter((_, j) => j !== i))}>Remove</button>
+                )}
+                {it.error && <div className="small" style={{ color: "var(--bad)", flexBasis: "100%" }}>{it.error}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {queue.length > 1 && (
+          <p className="muted small">
+            Prints are processed one at a time in the background. A large batch can take hours —
+            you can close this window and watch progress in the list.
+          </p>
+        )}
+        {failed > 0 && !busy && (
+          <p className="small" style={{ color: "var(--bad)" }}>{failed} file(s) failed. Press upload again to retry just those.</p>
+        )}
         {error && <p style={{ color: "var(--bad)" }} className="small">{error}</p>}
+
         <div className="row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
-          <button onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Uploading…" : "Upload & process"}</button>
+          <button onClick={onClose} disabled={busy}>{allDone ? "Close" : "Cancel"}</button>
+          <button className="primary" onClick={submit} disabled={busy || remaining === 0}>
+            {busy ? "Uploading…" : `Upload & process${remaining > 1 ? ` (${remaining})` : ""}`}
+          </button>
         </div>
       </div>
     </div>

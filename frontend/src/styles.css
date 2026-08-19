@@ -120,3 +120,13 @@ tr.unverified td:first-child { border-left: 3px solid var(--warn); }
 .empty { text-align: center; color: var(--muted); padding: 48px 12px; }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .badge-low { color: var(--warn); font-size: 12px; }
+
+/* Batch upload queue */
+.upload-queue { margin: 10px 0; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.upload-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.upload-row:last-child { border-bottom: none; }
+.upload-state { width: 1.2em; text-align: center; font-weight: 700; }
+.upload-state.done { color: var(--good); }
+.upload-state.error { color: var(--bad); }
+.upload-state.uploading { color: var(--muted); }
+.upload-title { flex: 1; min-width: 160px; }
