@@ -94,6 +94,9 @@ class PrintPage(Base):
     extracted_text: Mapped[str | None] = mapped_column(Text, default=None)
     width: Mapped[int | None] = mapped_column(Integer, default=None)
     height: Mapped[int | None] = mapped_column(Integer, default=None)
+    # A tech asserting "this page is now fully correct". Reviewed pages are the
+    # ground truth that extraction accuracy is measured against.
+    reviewed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     print: Mapped["Print"] = relationship(back_populates="pages")
 
@@ -114,6 +117,9 @@ class Component(Base):
     bbox: Mapped[list | None] = mapped_column(JSONB, default=None)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     verified: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # extracted = the model produced it; manual = a tech added what the model
+    # missed. Needed to measure recall.
+    origin: Mapped[str] = mapped_column(String(20), default="extracted", index=True)
 
     print: Mapped["Print"] = relationship(back_populates="components")
 
@@ -134,6 +140,9 @@ class Wire(Base):
     bbox: Mapped[list | None] = mapped_column(JSONB, default=None)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     verified: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # extracted = the model produced it; manual = a tech added what the model
+    # missed. Needed to measure recall.
+    origin: Mapped[str] = mapped_column(String(20), default="extracted", index=True)
 
     print: Mapped["Print"] = relationship(back_populates="wires")
 

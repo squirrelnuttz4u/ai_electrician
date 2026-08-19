@@ -70,6 +70,7 @@ class ComponentOut(ORMModel):
     bbox: list | None
     confidence: float
     verified: bool
+    origin: str = "extracted"
 
 
 class ComponentUpdate(BaseModel):
@@ -94,6 +95,7 @@ class WireOut(ORMModel):
     bbox: list | None
     confidence: float
     verified: bool
+    origin: str = "extracted"
 
 
 class WireUpdate(BaseModel):
@@ -104,6 +106,53 @@ class WireUpdate(BaseModel):
     to_ref: str | None = None
     bbox: list | None = None
     verified: bool | None = None
+    note: str | None = None
+
+
+class ComponentCreate(BaseModel):
+    """A component the extractor missed, added by hand."""
+    page_number: int
+    designator: str
+    type: str | None = None
+    description: str | None = None
+    voltage: str | None = None
+
+
+class WireCreate(BaseModel):
+    """A wire the extractor missed, added by hand."""
+    page_number: int
+    wire_number: str
+    voltage: str | None = None
+    color: str | None = None
+    from_ref: str | None = None
+    to_ref: str | None = None
+
+
+class PageReviewIn(BaseModel):
+    reviewed: bool = True
+
+
+class PageReviewOut(BaseModel):
+    print_id: int
+    page_number: int
+    reviewed: bool
+
+
+class AccuracyOut(BaseModel):
+    """Extraction accuracy over pages a tech has marked fully reviewed.
+
+    Ratios are None until there is something to divide by, rather than 0.0,
+    so "not measured yet" is never mistaken for "scored zero".
+    """
+    machine_id: int
+    reviewed_pages: int
+    kept: int         # extracted, survived review
+    rejected: int     # extracted, deleted as wrong
+    missed: int       # tech had to add it by hand
+    corrected: int    # extracted, kept, but edited
+    precision: float | None
+    recall: float | None
+    correction_rate: float | None
     note: str | None = None
 
 
